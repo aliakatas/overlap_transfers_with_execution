@@ -19,10 +19,12 @@ cudaError_t execute_GPU_chunk_by_chunk(real* c_from_d, const real* a, const real
 	const size_t nstreams, const size_t nparts, const size_t reps, const real dt, const bool useGPUPitch = false);
 
 // Decide how to partition the matrix
-void domain_partitioning(const size_t nrows, const size_t ncols, const int narraysReal, const int narraysChar,
-	const size_t gpuMemBytes, size_t& rowPartitions, size_t& colPartitions, size_t& propRowPartitions, size_t& propColPartitions);
+void domain_partitioning(const size_t nrows, const size_t ncols, const size_t narraysReal, const size_t narraysChar, const size_t narraysInt, const size_t narraysBool, const float buffRatio,
+	size_t& partsRows, size_t& partCols);
 
 // Run a preliminary query to find CUDA-supported devices
 bool deviceQuery();
 
+// Caclulate the max divisor of a number
+size_t divisor(size_t number);
 

@@ -230,6 +230,7 @@ int main(int argc, char** argv)
     timer.stop();
 
     // Check results!
+    timer.start("Check results on CPU ");
     printf("\n ************************************************** \n");
     size_t diff = check_answer(c_h, c_from_GPU_one, myRC.nrows, myRC.ncols, myRC.tolerance);
     if (diff)
@@ -261,6 +262,7 @@ int main(int argc, char** argv)
     else
         printf("  Results (chunks with pitch) OK! \n");
     printf(" ************************************************** \n");
+    timer.stop();
 
     // Timings
     timer.print();

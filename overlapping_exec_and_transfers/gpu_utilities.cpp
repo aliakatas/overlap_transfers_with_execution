@@ -379,74 +379,66 @@ cudaError_t execute_GPU_chunk_by_chunk(real* c_from_d, const real* a, const real
 }
 
 // Decide how to partition the matrix
-void domain_partitioning(const size_t nrows, const size_t ncols, const int narraysReal, const int narraysChar, 
-	const size_t gpuMemBytes, size_t& rowPartitions, size_t& colPartitions, size_t& propRowPartitions, size_t& propColPartitions)
+void domain_partitioning(const size_t nrows, const size_t ncols, const size_t narraysReal, const size_t narraysChar, const size_t narraysInt, const size_t narraysBool, const float buffRatio,
+	size_t& partsRows, size_t& partCols)
 {
-	printf("\n");
+	// Retrieve information on free and total memory of the device
+	size_t freeMem = 0;
+	size_t totalMem = 0;
+	cudaMemGetInfo(&freeMem, &totalMem);
 
-	// This is the smallest amount of information to be processed by a block of threads
-	const size_t minNelements = BLOCKX * BLOCKY;
+	// This is the memory needed in bytes for all the matrices required 
+	const size_t minMemNeedPerElement = (narraysReal * sizeof(real) + narraysChar * sizeof(char) + narraysInt * sizeof(int) + narraysBool * sizeof(bool));
 
-	// This is the memory needed in bytes for all the matrices required in a block of threads
-	const size_t minMemNeed = (narraysChar * sizeof(char) + narraysReal * sizeof(float)) * minNelements;
+	// This is the overall memory needed 
+	const size_t overMemNeed = nrows * ncols * minMemNeedPerElement;
 
-	// The quantum of a domain is: BLOCKX x BLOCKY
-	rowPartitions = (nrows + BLOCKY - 1) / BLOCKY;
-	colPartitions = (ncols + BLOCKX - 1) / BLOCKX;
-	size_t subDomainsNeeded = rowPartitions * colPartitions;
-
-	// This is the overall memory need given the partitioning (overestimating, but not that bad...)
-	const size_t overMemNeed = rowPartitions * colPartitions * minMemNeed;
-
-	// This is how many rounds it takes to process all blocks given the limited amount of memory
-	const size_t nRounds = (overMemNeed + gpuMemBytes - 1) / gpuMemBytes;
-
-	// This is how many min blocks fit in memory at any given time
-	const size_t numOfBlockFitting = gpuMemBytes / minMemNeed;
-
-	printf("                   Processing rows x cols :: %u x %u \n", nrows, ncols);
-	printf("                        Min block of work :: %u x %u \n", BLOCKY, BLOCKX);
-	printf("                       Partitions of work :: %u x %u \n", rowPartitions, colPartitions);
-	printf("               Memory needs for min block :: %u Bytes \n", minMemNeed);
-	printf("              Memory needs for all blocks :: %u Bytes \n", overMemNeed);
-	printf("                         Available memory :: %u Bytes \n", gpuMemBytes);
-	printf("       Number of blocks fitting in memory :: %u \n", numOfBlockFitting);
-	printf(" Number of rounds to process all elements :: %u \n", nRounds);
-	
-	propRowPartitions = 1;
-	propColPartitions = colPartitions;
-	while (true)
+	// Does the model fit in memory?
+	const size_t freeMemAllowed = freeMem * buffRatio;
+	if (overMemNeed <= freeMemAllowed)
 	{
-		propRowPartitions = numOfBlockFitting / propColPartitions;
-		if (propRowPartitions > 0)
-			break;
-		
-		propColPartitions /= 2;
+		partsRows = 1;
+		partCols = 1;
+		return;
 	}
 
-	printf("                       Proposed partition :: % u x %u  (%u) \n", propRowPartitions, propColPartitions, propColPartitions * propRowPartitions);
+	size_t controlDimSize = nrows > ncols ? nrows : ncols;
+	size_t otherDimSize = nrows * ncols / controlDimSize;
+	size_t div = 0;
+	size_t div2 = 0;
+	while (true)
+	{
+		div = divisor(controlDimSize);
+		if (div * otherDimSize * minMemNeedPerElement <= freeMemAllowed)
+		{
+			partsRows = nrows > ncols ? div : otherDimSize;
+			partCols = nrows * ncols / partsRows;
+			return;
+		}
 
+		div2 = divisor(otherDimSize);
+		if (div * div2 * minMemNeedPerElement <= freeMemAllowed)
+		{
+			partsRows = nrows > ncols ? div : div2;
+			partCols = nrows * ncols / partsRows;
+			return;
+		}
 
+		controlDimSize /= div;
+		otherDimSize /= div2;
+	}
+}
 
-
-
-
-
-	
-
-	//size_t remainingRows = nrows % BLOCKY;
-	//size_t remainingCols = ncols % BLOCKX;
-	//if (remainingRows > 0) ++rowParts;
-	//if (remainingCols > 0) ++colParts;
-
-	//printf("      Processing rows x cols :: %d x %d \n", nrows, ncols);
-	//printf("    Number of row partitions :: %d \n", rowParts);
-	//printf(" Number of column partitions :: %d \n", colParts);
-	//printf("   Remaining rows to process :: %d \n", remainingRows);
-	//printf("Remaining columns to process :: %d \n", remainingCols);
-
-
-
+// Caclulate the max divisor of a number
+size_t divisor(size_t number)
+{
+	size_t i;
+	for (i = 2; i <= sqrt(number); ++i)
+	{
+		if (number % i == 0)
+			return number / i;
+	}
+	return 1;
 }
 
 // Run a preliminary query to find CUDA-supported devices
