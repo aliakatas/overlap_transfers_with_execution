@@ -54,6 +54,8 @@ void calculateOnCPU(real* xpy, const real* x, const real* y, const size_t rows, 
         memcpy(temp, xpy, rows * cols * sizeof(real));
     }
     // This is not doing anything fancy. Just keeps the CPU busy for some time.
+    
+    printf(" \n");
 }
 
 // Compare results.

@@ -64,28 +64,4 @@ extern "C" __global__ void modifyKernel_part(real* d, const real* a, const real*
     }
 }
 
-/******************************************************/
-extern "C" __global__ void addKernel_pitch(real* c, const real* a, const real* b, const size_t nrows, const size_t ncols, const size_t pitch)
-{
-    size_t col = threadIdx.x + blockDim.x * blockIdx.x;
-    size_t row = threadIdx.y + blockDim.y * blockIdx.y;
 
-    if ((col < ncols) && (row < nrows))
-    {
-        size_t idx = row * (pitch / sizeof(real)) + col;
-        c[idx] = a[idx] + b[idx];
-    }
-}
-
-/******************************************************/
-extern "C" __global__ void modifyKernel_pitch(real* c, const real* a, const real* b, const real dt, const size_t nrows, const size_t ncols, const size_t pitch)
-{
-    size_t col = threadIdx.x + blockDim.x * blockIdx.x;
-    size_t row = threadIdx.y + blockDim.y * blockIdx.y;
-
-    if ((col < ncols) && (row < nrows))
-    {
-        size_t idx = row * (pitch / sizeof(real)) + col;
-        c[idx] = c[idx] + dt * (tanh(a[idx]) + tanh(b[idx]));
-    }
-}

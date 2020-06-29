@@ -20,7 +20,7 @@ int main(int argc, char** argv)
     // Create some general info...
     const size_t arraySize = myRC.ncols * myRC.nrows;
     const size_t bytesPerMatrix = arraySize * sizeof(real);
-    const size_t numOfHostMatrices = 8;
+    const size_t numOfHostMatrices = 9;
     const size_t numOfDeviceMatrices = 4;
 
     // Show some info on the work to be done...
@@ -48,7 +48,8 @@ int main(int argc, char** argv)
     real* c_from_GPU_one = nullptr;
     real* c_from_GPU_stream = nullptr;
     real* c_from_GPU_chunk = nullptr;
-    real *c_from_GPU_2Dstreams = nullptr;
+    real* c_from_GPU_stream_pitch = nullptr;
+    real* c_from_GPU_chunk_with_pitch = nullptr;
 
     // Allocate host arrays
     cudaError_t pin_alloc = cudaMallocHost((void**)&a_h, bytesPerMatrix);
@@ -110,15 +111,25 @@ int main(int argc, char** argv)
     else
         printf("Allocated pinned memory for c_from_GPU_chunk. \n");
 
-    pin_alloc = cudaMallocHost((void**)&c_from_GPU_2Dstreams, bytesPerMatrix);
+    pin_alloc = cudaMallocHost((void**)&c_from_GPU_stream_pitch, bytesPerMatrix);
     if (pin_alloc != cudaSuccess)
     {
-        printf("Error allocating c_from_GPU_2Dstreams... \n");
+        printf("Error allocating c_from_GPU_stream_pitch... \n");
         printf("%s \n", cudaGetErrorString(pin_alloc));
         return -999;
     }
     else
-        printf("Allocated pinned memory for c_from_GPU_2Dstreams. \n");
+        printf("Allocated pinned memory for c_from_GPU_stream_pitch. \n");
+
+    pin_alloc = cudaMallocHost((void**)&c_from_GPU_chunk_with_pitch, bytesPerMatrix);
+    if (pin_alloc != cudaSuccess)
+    {
+        printf("Error allocating c_from_GPU_chunk_with_pitch... \n");
+        printf("%s \n", cudaGetErrorString(pin_alloc));
+        return -999;
+    }
+    else
+        printf("Allocated pinned memory for c_from_GPU_chunk_with_pitch. \n");
 
     // Initialise the input matrices
     initialise(a_h, myRC.nrows, myRC.ncols);
@@ -174,7 +185,7 @@ int main(int argc, char** argv)
     // Run on GPU - all data across, use streams
     printf("GPU execution (streams)... \n");
     timer.start("GPU execution (streams) ");
-    devExec = execute_GPU_with_streams(c_from_GPU_stream, a_h, b_h, bytesPerMatrix, myRC.nrows, myRC.ncols, myRC.n_streams, myRC.reps, myRC.dt);
+    devExec = execute_GPU_with_streams(c_from_GPU_stream, a_h, b_h, bytesPerMatrix, myRC.nrows, myRC.ncols, myRC.n_streams, myRC.reps, myRC.dt, myRC.ncols);
     if (devExec != cudaSuccess)
     {
         printf("Error executing with streams on GPU... \n");
@@ -182,10 +193,10 @@ int main(int argc, char** argv)
     }
     timer.stop();
 
-    /*
+    // Run on GPU - partition data and send chunks across, use streams
     printf("GPU execution (chunks)... \n");
     timer.start("GPU execution (chunks) ");
-    devExec = execute_GPU_chunk_by_chunk(c_from_GPU_chunk, a_h, b_h, bytes, arraySize, n_streams, n_parts, reps);
+    devExec = execute_GPU_chunk_by_chunk(c_from_GPU_chunk, a_h, b_h, bytesPerMatrix, myRC.nrows, myRC.ncols, myRC.n_streams, myRC.parts, myRC.reps, myRC.dt);
     if (devExec != cudaSuccess)
     {
         printf("Error executing chunk by chunk on GPU... \n");
@@ -193,54 +204,67 @@ int main(int argc, char** argv)
     }
     timer.stop();
 
-    printf("GPU execution (streams with 2D)... \n");
-    timer.start("GPU execution (streams with 2D) ");
-    devExec = execute_GPU_with_streams_pitch(c_from_GPU_2Dstreams, a_h, b_h, nrows, ncols, reps);
+    // Turn on pitched memory on GPU
+    const bool pitchedMemOn = true;
+
+    // Run on GPU - all data across, use streams and pitched memory
+    printf("GPU execution (streams with pitch)... \n");
+    timer.start("GPU execution (streams with pitch) ");
+    devExec = execute_GPU_with_streams(c_from_GPU_stream_pitch, a_h, b_h, bytesPerMatrix, myRC.nrows, myRC.ncols, myRC.n_streams, myRC.reps, myRC.dt, myRC.ncols, pitchedMemOn);
     if (devExec != cudaSuccess)
     {
-        printf("Error executing chunk by chunk on GPU... \n");
+        printf("Error executing streams with pitch on GPU... \n");
         return -4;
     }
-    timer.stop();*/
+    timer.stop();
+
+    // Run on GPU - partition data and send chunks across, use streams and pitched memory
+    printf("GPU execution (chunks with pitch)... \n");
+    timer.start("GPU execution (chunks with pitch) ");
+    devExec = execute_GPU_chunk_by_chunk(c_from_GPU_chunk_with_pitch, a_h, b_h, bytesPerMatrix, myRC.nrows, myRC.ncols, myRC.n_streams, myRC.parts, myRC.reps, myRC.dt, pitchedMemOn);
+    if (devExec != cudaSuccess)
+    {
+        printf("Error executing chunk by chunk (with pitch) on GPU... \n");
+        return -3;
+    }
+    timer.stop();
 
     // Check results!
     printf("\n ************************************************** \n");
     size_t diff = check_answer(c_h, c_from_GPU_one, myRC.nrows, myRC.ncols, myRC.tolerance);
     if (diff)
-        printf("Discrepancy detected in results from kernel in one take! -> %llu errors \n", diff);
+        printf("  Discrepancy detected in results from kernel in one take! -> %llu errors \n", diff);
     else
-        printf("Results (one take) OK! \n");
+        printf("  Results (one take) OK! \n");
 
     diff = check_answer(c_h, c_from_GPU_stream, myRC.nrows, myRC.ncols, myRC.tolerance);
     if (diff)
-        printf("Discrepancy detected in results from kernel with streams! -> %llu errors \n", diff);
+        printf("  Discrepancy detected in results from kernel with streams! -> %llu errors \n", diff);
     else
-        printf("Results (streams) OK! \n");
+        printf("  Results (streams) OK! \n");
 
-    /*
-    diff = check_answer(c_h, c_from_GPU_chunk, nrows, ncols, epsilon);
+    diff = check_answer(c_h, c_from_GPU_chunk, myRC.nrows, myRC.ncols, myRC.tolerance);
     if (diff)
-    {
-        printf("Discrepancy detected in results from chunks! # %llu \n", diff);
-    }
+        printf("  Discrepancy detected in results from chunks! -> %llu errors \n", diff);
     else
-    {
-        printf("Results (chunks) OK! \n");
-    }
+        printf("  Results (chunks) OK! \n");
 
-    diff = check_answer(c_h, c_from_GPU_2Dstreams, nrows, ncols, epsilon);
+    diff = check_answer(c_h, c_from_GPU_stream_pitch, myRC.nrows, myRC.ncols, myRC.tolerance);
     if (diff)
-    {
-        printf("Discrepancy detected in results from 2D streams! # %llu \n", diff);
-    }
+        printf("  Discrepancy detected in results from streams with pitch! # %llu \n", diff);
     else
-    {
-        printf("Results (2D streams) OK! \n");
-    }
-*/
+        printf("  Results (streams with pitch) OK! \n");
+    
+    diff = check_answer(c_h, c_from_GPU_chunk_with_pitch, myRC.nrows, myRC.ncols, myRC.tolerance);
+    if (diff)
+        printf("  Discrepancy detected in results from chunks with pitch! # %llu \n", diff);
+    else
+        printf("  Results (chunks with pitch) OK! \n");
+    printf(" ************************************************** \n");
 
     // Timings
     timer.print();
+    printf(" \n");
 
     // Reset device
     devSet = cudaDeviceReset();

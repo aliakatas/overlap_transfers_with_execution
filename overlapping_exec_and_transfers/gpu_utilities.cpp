@@ -13,8 +13,6 @@ CUfunction haddKernel = nullptr;
 CUfunction hmodifyKernel = nullptr;
 CUfunction haddKernel_part = nullptr;
 CUfunction hmodifyKernel_part = nullptr;
-CUfunction haddKernel_pitch = nullptr;
-CUfunction hmodifyKernel_pitch = nullptr;
 
 // Load PTX file(s) containing the kernels (JIT)
 bool load_all_ptx()
@@ -32,19 +30,20 @@ bool load_all_ptx()
 		cuModuleGetFunction(&hmodifyKernel, hmodule, "modifyKernel");
 		cuModuleGetFunction(&haddKernel_part, hmodule, "addKernel_part");
 		cuModuleGetFunction(&hmodifyKernel_part, hmodule, "modifyKernel_part");
-		cuModuleGetFunction(&haddKernel_pitch, hmodule, "addKernel_pitch");
-		cuModuleGetFunction(&hmodifyKernel_pitch, hmodule, "modifyKernel_pitch");
 	}
 	else
 	{
 		printf("\nFailed to JIT  kernels.cu ! \n");
 		return false;
 	}
+
+	printf(" \n");
 	return true;
 }
 
 // Run on GPU with all the workload in one take
-cudaError_t execute_GPU_in_one_take(real* c_from_d, const real* a, const real* b, const size_t nrows, const size_t ncols, const size_t bytes, const size_t reps, const real dt)
+cudaError_t execute_GPU_in_one_take(real* c_from_d, const real* a, const real* b, const size_t nrows, const size_t ncols, const size_t bytes, 
+	const size_t reps, const real dt)
 {
 	// Define necessary variables
 	cudaError_t exitStat = cudaSuccess;
@@ -157,11 +156,13 @@ cudaError_t execute_GPU_in_one_take(real* c_from_d, const real* a, const real* b
 	cudaFree(c_d);
 	cudaFree(w_d);
 
+	printf(" \n");
 	return exitStat;
 }
 
 // Run on GPU with all the workload using streams
-cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* b, const size_t bytes, const size_t nrows, const size_t ncols, const size_t nstreams, const size_t reps, const real dt)
+cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* b, const size_t bytes, const size_t nrows, const size_t ncols, 
+	const size_t nstreams, const size_t reps, const real dt, const size_t hostPitch, const bool useGPUPitch)
 {
 	// Define necessary variables
 	cudaError_t exitStat = cudaSuccess;
@@ -169,9 +170,15 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 	real* b_d = nullptr;
 	real* c_d = nullptr;
 	real* w_d = nullptr;
-	
+
+	size_t pitch = 0;
+	cudaError_t allocStat;
+
 	// Allocate memory on GPU
-	cudaError_t allocStat = cudaMalloc((void**)&a_d, bytes);
+	if (useGPUPitch)
+		allocStat = cudaMallocPitch((void**)&a_d, &pitch, ncols * sizeof(real), nrows);
+	else
+		allocStat = cudaMalloc((void**)&a_d, bytes);
 	if (allocStat != cudaSuccess)
 	{
 	    printf("Error allocating a_d... \n");
@@ -181,7 +188,10 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 	else
 		printf("Allocated GPU memory for a_d... \n");
 	
-	allocStat = cudaMalloc((void**)&b_d, bytes);
+	if (useGPUPitch)
+		allocStat = cudaMallocPitch((void**)&b_d, &pitch, ncols * sizeof(real), nrows);
+	else
+		allocStat = cudaMalloc((void**)&b_d, bytes);
 	if (allocStat != cudaSuccess)
 	{
 	    printf("Error allocating b_d... \n");
@@ -191,7 +201,10 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 	else
 		printf("Allocated GPU memory for b_d... \n");
 	
-	allocStat = cudaMalloc((void**)&c_d, bytes);
+	if (useGPUPitch)
+		allocStat = cudaMallocPitch((void**)&c_d, &pitch, ncols * sizeof(real), nrows);
+	else
+		allocStat = cudaMalloc((void**)&c_d, bytes);
 	if (allocStat != cudaSuccess)
 	{
 	    printf("Error allocating c_d... \n");
@@ -201,7 +214,10 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 	else
 		printf("Allocated GPU memory for c_d... \n");
 
-	allocStat = cudaMalloc((void**)&w_d, bytes);
+	if (useGPUPitch)
+		allocStat = cudaMallocPitch((void**)&w_d, &pitch, ncols * sizeof(real), nrows);
+	else
+		allocStat = cudaMalloc((void**)&w_d, bytes);
 	if (allocStat != cudaSuccess)
 	{
 		printf("Error allocating w_d... \n");
@@ -212,7 +228,10 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 		printf("Allocated GPU memory for w_d... \n");
 	
 	// Init to zero for intermediate array only
-	cudaMemset(w_d, 0, bytes);
+	if (useGPUPitch)
+		cudaMemset(w_d, 0, pitch * nrows);
+	else
+		cudaMemset(w_d, 0, bytes);
 
 	// Create the streams as requested...
 	cudaStream_t* streams = (cudaStream_t*)malloc(nstreams * sizeof(cudaStream_t));
@@ -224,7 +243,12 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 	size_t rowsPerStream = (nrows + nstreams - 1) / nstreams;
 	size_t colsPerStream = (ncols + nstreams - 1) / nstreams;
 	unsigned int i_stream = 0;
-	
+	size_t local_pitch = 0;
+	if (useGPUPitch)
+		local_pitch = pitch;
+	else
+		local_pitch = ncols * sizeof(real);
+
 	// Workload
 	for (auto irep = 0; irep < reps; ++irep)
 	{
@@ -248,11 +272,21 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 
 				dim3 block(BLOCKX, BLOCKY, 1);
 				dim3 grid((ncols_local + block.x - 1) / block.x, (nrows_local + block.y - 1) / block.y, 1);
+				
+				size_t ioffset = 0;
+				size_t stride = 0;
+				
+				if (useGPUPitch)
+					stride = pitch / sizeof(real);
+				else
+					stride = ncols;
 
-				size_t ioffset = rowOffset * ncols + colOffset;
+				ioffset = rowOffset * stride + colOffset;
+				
+				size_t hoffset = rowOffset * hostPitch + colOffset;
 
-				cudaMemcpy2DAsync(&a_d[ioffset], ncols * sizeof(real), &a[ioffset], ncols * sizeof(real), ncols_local * sizeof(real), nrows_local, cudaMemcpyHostToDevice, streams[i_stream]);
-				cudaMemcpy2DAsync(&b_d[ioffset], ncols * sizeof(real), &b[ioffset], ncols * sizeof(real), ncols_local * sizeof(real), nrows_local, cudaMemcpyHostToDevice, streams[i_stream]);
+				cudaMemcpy2DAsync(&a_d[ioffset], local_pitch, &a[hoffset], hostPitch * sizeof(real), ncols_local * sizeof(real), nrows_local, cudaMemcpyHostToDevice, streams[i_stream]);
+				cudaMemcpy2DAsync(&b_d[ioffset], local_pitch, &b[hoffset], hostPitch * sizeof(real), ncols_local * sizeof(real), nrows_local, cudaMemcpyHostToDevice, streams[i_stream]);
 
 				// Unfortunately, one cannot simply pass the addresses...
 				real* w_dd = &w_d[ioffset];
@@ -261,7 +295,7 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 				real* b_dd = &b_d[ioffset];
 
 				//addKernel_part(real* c, const real* a, const real* b, const size_t rows, const size_t cols, const size_t stride, const real dt)
-				void* args[7] = { (void*)&w_dd, (void*)&a_dd, (void*)&b_dd, (void*)&nrows_local, (void*)&ncols_local, (void*)&ncols, (void*)&dt };
+				void* args[7] = { (void*)&w_dd, (void*)&a_dd, (void*)&b_dd, (void*)&nrows_local, (void*)&ncols_local, (void*)&stride, (void*)&dt };
 				CUresult launchErr = cuLaunchKernel(haddKernel_part, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, streams[i_stream], args, NULL);
 				if (launchErr != CUDA_SUCCESS)
 				{
@@ -270,7 +304,7 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 				}
 
 				//modifyKernel_part(real* d, const real* a, const real* b, const real* c, const real dt, const size_t rows, const size_t cols, const size_t stride)
-				void* argsM[8] = { (void*)&c_dd, (void*)&a_dd, (void*)&b_dd, (void*)&w_dd, (void*)&dt, (void*)&nrows_local, (void*)&ncols_local, (void*)&ncols };
+				void* argsM[8] = { (void*)&c_dd, (void*)&a_dd, (void*)&b_dd, (void*)&w_dd, (void*)&dt, (void*)&nrows_local, (void*)&ncols_local, (void*)&stride };
 				launchErr = cuLaunchKernel(hmodifyKernel_part, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, streams[i_stream], argsM, NULL);
 				if (launchErr != CUDA_SUCCESS)
 				{
@@ -278,14 +312,14 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 					return cudaErrorLaunchFailure;
 				}
 
-				cudaMemcpy2DAsync(&w_d[ioffset], ncols * sizeof(real), &c_d[ioffset], ncols * sizeof(real), ncols_local * sizeof(real), nrows_local, cudaMemcpyDeviceToDevice, streams[i_stream]);
+				cudaMemcpy2DAsync(&w_d[ioffset], stride * sizeof(real), &c_d[ioffset], local_pitch, ncols_local * sizeof(real), nrows_local, cudaMemcpyDeviceToDevice, streams[i_stream]);
 
 				i_stream = (i_stream + 1) % nstreams;
 			}
 		}
 	}
 	
-	cudaError_t syncError = cudaMemcpy2D(c_from_d, ncols * sizeof(real), c_d, ncols * sizeof(real), ncols * sizeof(real), nrows, cudaMemcpyDeviceToHost);
+	cudaError_t syncError = cudaMemcpy2D(c_from_d, hostPitch * sizeof(real), c_d, local_pitch, ncols * sizeof(real), nrows, cudaMemcpyDeviceToHost);
 	if (syncError != cudaSuccess)
 	{
 		printf("Error synchronising device... \n");
@@ -302,157 +336,46 @@ cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* 
 	cudaFree(c_d);
 	cudaFree(w_d);
 
+	printf(" \n");
 	return syncError;
 }
 
 // Run on GPU with the workload partitioned and utilising streams
-cudaError_t execute_GPU_chunk_by_chunk(float* c_from_d, const float* a, const float* b, const size_t bytes, const size_t arraySize, const int nstreams, const int nparts, const int reps)
+cudaError_t execute_GPU_chunk_by_chunk(real* c_from_d, const real* a, const real* b, const size_t bytes, const size_t nrows, const size_t ncols, 
+	const size_t nstreams, const size_t nparts, const size_t reps, const real dt, const bool useGPUPitch)
 {
 	cudaError_t exitStat = cudaSuccess;
 
-	size_t iArray = arraySize / nparts;
-	size_t rem = arraySize - iArray * nparts;
+	// Sort out logistics
+	size_t rowsPerPart = (nrows + nparts - 1) / nparts;
+	size_t colsPerPart = (ncols + nparts - 1) / nparts;
 
-	for (int i = 0; i < nparts; ++i)
+	for (auto irow = 0; irow < nparts; ++irow)
 	{
-		int ioffset = i * iArray;
-
-		if (i == nparts - 1)
-			iArray += rem;
-
-		//execute_GPU_with_streams(&c_from_d[ioffset], &a[ioffset], &b[ioffset], iArray * sizeof(float), iArray, nstreams, reps);
-	}
-
-	return exitStat;
-}
-
-// Run on GPU with all the workload using streams (maintaining 2D format)
-cudaError_t execute_GPU_with_streams_pitch(float* c_from_d, const float* a, const float* b, const size_t nrows, const size_t ncols, const int reps)
-{
-	cudaError_t exitStat = cudaSuccess;
-	float* a_d = nullptr;
-	float* b_d = nullptr;
-	float* c_d = nullptr;
-
-	size_t gpuPitchA;
-	size_t gpuPitchB;
-	size_t gpuPitchC;
-
-	cudaError_t allocStat = cudaMallocPitch((void**)&a_d, &gpuPitchA, ncols * sizeof(float), nrows);
-	if (allocStat != cudaSuccess)
-	{
-		printf("Error allocating a_d... \n");
-		printf("%s \n", cudaGetErrorString(allocStat));
-		return allocStat;
-	}
-	else
-		printf("Allocated GPU memory for a_d... \n");
-
-	allocStat = cudaMallocPitch((void**)&b_d, &gpuPitchB, ncols * sizeof(float), nrows);
-	if (allocStat != cudaSuccess)
-	{
-		printf("Error allocating b_d... \n");
-		printf("%s \n", cudaGetErrorString(allocStat));
-		return allocStat;
-	}
-	else
-		printf("Allocated GPU memory for b_d... \n");
-
-	allocStat = cudaMallocPitch((void**)&c_d, &gpuPitchC, ncols * sizeof(float), nrows);
-	if (allocStat != cudaSuccess)
-	{
-		printf("Error allocating c_d... \n");
-		printf("%s \n", cudaGetErrorString(allocStat));
-		return allocStat;
-	}
-	else
-		printf("Allocated GPU memory for c_d... \n");
-
-	size_t rowPartitions = 0;
-	size_t colPartitions = 0;
-	size_t rowChunkPartitions = 0;
-	size_t colChunkPartitions = 0;
-	domain_partitioning(nrows, ncols, 12, 4, 1024 * 1024 * 1024, rowPartitions, colPartitions, rowChunkPartitions, colChunkPartitions);
-
-	size_t stream_x = (colPartitions + colChunkPartitions - 1) / colChunkPartitions;
-	size_t stream_y = (rowPartitions + rowChunkPartitions - 1) / rowChunkPartitions;
-	size_t nstreams = stream_x * stream_y;
-#ifdef _DEBUG
-	nstreams = 2;
-#else
-	nstreams = 5;
-#endif 
-	cudaStream_t * streams = (cudaStream_t*)malloc(nstreams * sizeof(cudaStream_t));
-	for (int i = 0; i < nstreams; i++) {
-		cudaStreamCreate(&streams[i]);
-	}
-
-	size_t rowPerStream = (nrows + nstreams - 1) / nstreams;
-	size_t colPerStream = (ncols + nstreams - 1) / nstreams;
-
-	size_t iterOverRows = (nrows + rowPerStream - 1) / rowPerStream;
-	size_t iterOverCols = (ncols + colPerStream - 1) / colPerStream;
-
-	unsigned int istream = 0;
-	for (auto ir = 0; ir < iterOverRows; ++ir)
-	{
-		for (auto ic = 0; ic < iterOverCols; ++ic)
+		for (auto icol = 0; icol < nparts; ++icol)
 		{
-			size_t rowOffset = ir * rowPerStream;
-			size_t colOffset = ic * colPerStream;
-				
-			size_t rowNum = rowPerStream;
-			size_t colNum = colPerStream;
+			// Calculate offsets and size of chunks
+			size_t nrows_local = rowsPerPart;
+			size_t ncols_local = colsPerPart;
 
-			// Get the number of rows and columns on which this stream operates
-			if (rowOffset + rowNum > nrows)
-				rowNum = nrows - rowOffset;
-			if (colOffset + colNum > ncols)
-				colNum = ncols - colOffset;
+			size_t rowOffset = irow * nrows_local;
+			size_t colOffset = icol * ncols_local;
 
-			size_t h_idx = rowOffset * ncols + colOffset;
-			size_t colPitch = (gpuPitchA / sizeof(float));
-			size_t d_idxA = rowOffset * (gpuPitchA / sizeof(float)) + colOffset;
-			size_t d_idxB = rowOffset * (gpuPitchB / sizeof(float)) + colOffset;
-			size_t d_idxC = rowOffset * (gpuPitchC / sizeof(float)) + colOffset;
+			// Do not exceed real size of the array
+			if (rowOffset + nrows_local > nrows)
+				nrows_local = nrows - rowOffset;
+			if (colOffset + ncols_local > ncols)
+				ncols_local = ncols - colOffset;
 
-			//T * pElement = (T*)((char*)BaseAddress + Row * pitch) + Column;
+			size_t ioffset = rowOffset * ncols + colOffset;
 
-			cudaMemcpy2DAsync(&a_d[d_idxA], gpuPitchA, &a[h_idx], ncols * sizeof(float), colNum * sizeof(float), rowNum, cudaMemcpyHostToDevice, streams[istream]);
-			cudaMemcpy2DAsync(&b_d[d_idxB], gpuPitchB, &b[h_idx], ncols * sizeof(float), colNum * sizeof(float), rowNum, cudaMemcpyHostToDevice, streams[istream]);
-
-			float* c_dd = &c_d[d_idxC];
-			float* a_dd = &a_d[d_idxA];
-			float* b_dd = &b_d[d_idxB];
-			void* args[7] = { (void*)&c_dd, (void*)&a_dd, (void*)&b_dd, (void*)&reps, (void*)&rowNum, (void*)&colNum, (void*)&gpuPitchC };
-
-			dim3 block(16, 16, 1);
-			dim3 grid((colNum + block.x - 1) / block.x, (rowNum + block.y - 1) / block.y, 1);
-
-			cuLaunchKernel(haddKernel_pitch, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, streams[istream], args, NULL);
-			cuLaunchKernel(hmodifyKernel_pitch, grid.x, grid.y, grid.z, block.x, block.y, block.z, 0, streams[istream], args, NULL);
-
-			cudaMemcpy2DAsync(&c_from_d[h_idx], ncols * sizeof(float), &c_d[d_idxC], gpuPitchC, colNum * sizeof(float), rowNum, cudaMemcpyDeviceToHost, streams[istream]);
-			istream = ++istream % nstreams;
+			execute_GPU_with_streams(&c_from_d[ioffset], &a[ioffset], &b[ioffset], nrows_local * ncols_local * sizeof(real), nrows_local, ncols_local,
+				nstreams, reps, dt, ncols, useGPUPitch);
 		}
 	}
-	
-	cudaError_t syncError = cudaDeviceSynchronize();
-	if (syncError != cudaSuccess)
-	{
-		printf("Error synchronising device... \n");
-		printf("%s \n", cudaGetErrorString(syncError));
-	}
 
-	for (int i = 0; i < nstreams; i++) {
-		cudaStreamDestroy(streams[i]);
-	}
-
-	cudaFree(a_d);
-	cudaFree(b_d);
-	cudaFree(c_d);
-
-	return syncError;
+	printf(" \n");
+	return exitStat;
 }
 
 // Decide how to partition the matrix
