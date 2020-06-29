@@ -10,7 +10,7 @@ bool load_all_ptx();
 cudaError_t execute_GPU_in_one_take(real* c_from_d, const real* a, const real* b, const size_t nrows, const size_t ncols, const size_t bytes, const size_t reps, const real dt);
 
 // Run on GPU with all the workload using streams
-cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* b, const size_t bytes, const size_t arraySize, const size_t nstreams, const size_t reps, const real dt);
+cudaError_t execute_GPU_with_streams(real* c_from_d, const real* a, const real* b, const size_t bytes, const size_t nrows, const size_t ncols, const size_t nstreams, const size_t reps, const real dt);
 
 // Run on GPU with the workload partitioned and utilising streams
 cudaError_t execute_GPU_chunk_by_chunk(float* c_from_d, const float* a, const float* b, const size_t bytes, const size_t arraySize, const int nstreams, const int nparts, const int reps);

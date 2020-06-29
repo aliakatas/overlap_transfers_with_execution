@@ -23,7 +23,6 @@ extern "C" __global__ void addKernel(real *c, const real *a, const real *b, cons
         size_t idx = j * cols + i;
         c[idx] = c[idx] + dt * (a[idx] + b[idx]);
     }
-        
 }
 
 /******************************************************/
@@ -40,21 +39,29 @@ extern "C" __global__ void modifyKernel(real* d, const real* a, const real* b, c
 }
 
 /******************************************************/
-extern "C" __global__ void addKernel_part(real* c, const real* a, const real* b, const size_t size)
+extern "C" __global__ void addKernel_part(real* c, const real* a, const real* b, const size_t rows, const size_t cols, const size_t stride, const real dt)
 {
-    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
-    
-    if (idx < size)
-        c[idx] = a[idx] + b[idx];
+    size_t i = threadIdx.x + blockDim.x * blockIdx.x;
+    size_t j = threadIdx.y + blockDim.y * blockIdx.y;
+
+    if (i < cols && j < rows)
+    {
+        size_t idx = j * stride + i;
+        c[idx] = c[idx] + dt * (a[idx] + b[idx]);
+    }
 }
 
 /******************************************************/
-extern "C" __global__ void modifyKernel_part(real* c, const real* a, const real* b, const real dt, const size_t size)
+extern "C" __global__ void modifyKernel_part(real* d, const real* a, const real* b, const real* c, const real dt, const size_t rows, const size_t cols, const size_t stride)
 {
-    size_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+    size_t i = threadIdx.x + blockDim.x * blockIdx.x;
+    size_t j = threadIdx.y + blockDim.y * blockIdx.y;
 
-    if (idx < size)
-        c[idx] = c[idx] + dt * (tanh(a[idx]) + tanh(b[idx]));
+    if (i < cols && j < rows)
+    {
+        size_t idx = j * stride + i;
+        d[idx] = c[idx] * c[idx] + dt * (tanh(a[idx]) + tanh(b[idx])) / real(2.0);
+    }
 }
 
 /******************************************************/

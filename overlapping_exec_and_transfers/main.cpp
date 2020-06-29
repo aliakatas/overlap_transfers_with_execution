@@ -174,7 +174,7 @@ int main(int argc, char** argv)
     // Run on GPU - all data across, use streams
     printf("GPU execution (streams)... \n");
     timer.start("GPU execution (streams) ");
-    devExec = execute_GPU_with_streams(c_from_GPU_stream, a_h, b_h, bytes, arraySize, n_streams, reps);
+    devExec = execute_GPU_with_streams(c_from_GPU_stream, a_h, b_h, bytesPerMatrix, myRC.nrows, myRC.ncols, myRC.n_streams, myRC.reps, myRC.dt);
     if (devExec != cudaSuccess)
     {
         printf("Error executing with streams on GPU... \n");
