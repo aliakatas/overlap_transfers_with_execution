@@ -32,6 +32,10 @@ struct RunConfiguration
 	size_t n_streams = 5;
 	size_t parts = 2;
 	real tolerance = real(0.0001);
+
+	size_t npoints = 0;
+	size_t* idxRow = nullptr;
+	size_t* idxCol = nullptr;
 };
 
 // Parse user inputs from the command-line and modify the configuration of the program.
@@ -40,4 +44,5 @@ void parseArguments(int argc, char** argv, RunConfiguration& rc);
 // Modify a specific configuration parameter according to user input.
 void setRunConfigurationParameter(const std::string istr, const std::string val, RunConfiguration& rc);
 
-
+// Create virtual BCs
+void setBClocations(RunConfiguration& rc);

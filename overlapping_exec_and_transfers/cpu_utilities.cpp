@@ -43,19 +43,34 @@ void modifyWithCPU(real* xpy, const real* x, const real* y, const real* w, const
 }
 
 // Perform a full cycle of computations
-void calculateOnCPU(real* xpy, const real* x, const real* y, const size_t rows, const size_t cols, const real dt, const size_t rep)
+void calculateOnCPU(real* xpy, const real* x, const real* y, const size_t rows, const size_t cols, const real dt, const size_t rep,
+    const size_t* idxRow, const size_t* idxCol, const size_t nBC)
 {
     real* temp = (real*)malloc(rows * cols * sizeof(real));
     memset(temp, 0, rows * cols * sizeof(real));
+    real time = real(0.0);
     for (auto i = 0; i < rep; ++i)
     {
         addWithCPU(temp, x, y, rows, cols, dt);
         modifyWithCPU(xpy, x, y, temp, rows, cols, dt);
+        applyBC(xpy, rows, cols, time, idxRow, idxCol, nBC);
         memcpy(temp, xpy, rows * cols * sizeof(real));
+        time += dt;
     }
     // This is not doing anything fancy. Just keeps the CPU busy for some time.
     
     printf(" \n");
+}
+
+// Simulate the application of boundary conditions
+void applyBC(real* xpy, const size_t rows, const size_t cols, const real val, const size_t* idxRow, const size_t* idxCol, const size_t num)
+{
+    size_t idx = 0;
+    for (auto i = 0; i < num; ++i)
+    {
+        idx = idxRow[i] * cols + idxCol[i];
+        xpy[idx] = val;
+    }
 }
 
 // Compare results.

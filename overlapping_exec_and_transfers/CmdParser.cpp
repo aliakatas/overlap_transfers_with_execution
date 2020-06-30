@@ -16,6 +16,8 @@ void parseArguments(int argc, char** argv, RunConfiguration &rc)
 		}
 		++iarg;
 	}
+
+	setBClocations(rc);
 }
 
 /**/
@@ -49,5 +51,37 @@ void setRunConfigurationParameter(const std::string istr, const std::string val,
 			rc.tolerance = std::stof(val);
 		else
 			rc.tolerance = std::stod(val);
+	}
+}
+
+/**/
+void setBClocations(RunConfiguration& rc)
+{
+	size_t npointsX = 3;
+	if (rc.ncols > 1000)
+		npointsX = 90;
+	else if (rc.ncols > 100)
+		npointsX = 9;
+
+	size_t npointsY = 2;
+	if (rc.nrows > 1000)
+		npointsY = 30;
+	else if (rc.nrows > 100)
+		npointsY = 6;
+
+	rc.npoints = npointsX * npointsY;
+
+	rc.idxCol = new size_t[rc.npoints];
+	rc.idxRow = new size_t[rc.npoints];
+	size_t idx = 0;
+	for (auto i = 0; i < npointsY; ++i)
+	{
+		for (auto j = 0; j < npointsX; ++j)
+		{
+			
+			rc.idxCol[idx] = rc.ncols * (float)j / (float)npointsX;
+			rc.idxRow[idx] = rc.nrows * (float)i / (float)npointsY;
+			++idx;
+		}
 	}
 }

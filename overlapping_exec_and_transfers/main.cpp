@@ -138,7 +138,7 @@ int main(int argc, char** argv)
     // Run work on CPU
     timer.start("CPU execution ");
     printf("Performing calculations on CPU... \n");
-    calculateOnCPU(c_h, a_h, b_h, myRC.nrows, myRC.ncols, myRC.dt, myRC.reps);
+    calculateOnCPU(c_h, a_h, b_h, myRC.nrows, myRC.ncols, myRC.dt, myRC.reps, myRC.idxRow, myRC.idxCol, myRC.npoints);
     timer.stop();
 
 #ifdef _DEBUG
